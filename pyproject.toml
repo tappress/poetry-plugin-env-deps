@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "poetry-plugin-env-deps"
+version = "0.1.0"
+description = "Poetry plugin for environment-specific dependencies"
+authors = ["Oleksandr Gotsulenko <a.gotsulenko@iconic.info>", "Andrii Vasin <tap.press.swap@gmail.com>"]
+packages = [
+    { include = "poetry_plugin_env_deps", from = "src" }
+]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+poetry = "^1.7.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.plugins."poetry.application.plugin"]
+env-dependency = "poetry_plugin_env_deps.plugin:EnvironmentDependencyPlugin"
