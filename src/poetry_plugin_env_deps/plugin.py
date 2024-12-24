@@ -29,8 +29,7 @@ class EnvDependencyManager:
 
         # Create a new package with only the active groups
         package = command.installer._package.with_dependency_groups(
-            active_groups,
-            only=True
+            active_groups, only=True
         )
 
         # Update the installer's package
@@ -69,10 +68,10 @@ class EnvironmentDependencyPlugin(poetry.plugins.application_plugin.ApplicationP
         )
 
     def event_listener(
-            self,
-            event: cleo.events.console_command_event.ConsoleCommandEvent,
-            event_name: str,
-            dispatcher: cleo.events.event_dispatcher.EventDispatcher,
+        self,
+        event: cleo.events.console_command_event.ConsoleCommandEvent,
+        event_name: str,
+        dispatcher: cleo.events.event_dispatcher.EventDispatcher,
     ) -> None:
         if not self.env_manager.should_process_command(event.command):
             return
