@@ -7,7 +7,11 @@ import cleo.events.event_dispatcher
 import poetry.console.application
 import poetry.plugins.application_plugin
 from poetry.console.commands.installer_command import InstallerCommand
+from poetry.console.commands.add import AddCommand
+from poetry.installation.installer import Installer
 from poetry.core.packages.dependency_group import MAIN_GROUP
+from poetry.utils.env import EnvManager
+from cleo.io.outputs.output import Verbosity
 
 
 class EnvDependencyManager:
@@ -18,26 +22,60 @@ class EnvDependencyManager:
         self.groups = config.get("groups", [])
         self.current_env = os.environ.get(self.env_variable)
 
-    def update_installer_package(self, command: InstallerCommand) -> None:
-        """Updates the installer package to only use current environment dependencies."""
-        if not self.current_env or self.current_env not in self.groups:
-            return
-
+    def get_active_groups(self):
+        """Get list of active dependency groups."""
         active_groups = [MAIN_GROUP]
-        if self.current_env:
+        if self.current_env and self.current_env in self.groups:
             active_groups.append(self.current_env)
+        return active_groups
 
-        # Create a new package with only the active groups
-        package = command.installer._package.with_dependency_groups(
-            active_groups, only=True
+    def update_package_groups(self, package) -> None:
+        """Updates package to only use current environment dependencies."""
+        if not self.current_env or self.current_env not in self.groups:
+            return package
+
+        return package.with_dependency_groups(
+            self.get_active_groups(),
+            only=True
         )
 
-        # Update the installer's package
-        command.installer._package = package
+    def setup_command(self, command, poetry) -> None:
+        """Initialize command with required resources."""
+        # Initialize environment if needed
+        if not hasattr(command, '_env') or command._env is None:
+            env_manager = EnvManager(poetry)
+            venv = env_manager.create_venv()
+            if venv:
+                command.set_env(venv)
+
+        # Update the poetry package
+        updated_package = self.update_package_groups(poetry._package)
+        if updated_package:
+            poetry._package = updated_package
+            if hasattr(command, 'poetry'):
+                command.poetry._package = updated_package
+
+        # Initialize installer if needed
+        if isinstance(command, InstallerCommand):
+            if not hasattr(command, '_installer') or command._installer is None:
+                installer = Installer(
+                    io=command.io,
+                    env=command.env,
+                    package=poetry.package,
+                    locker=poetry.locker,
+                    pool=poetry.pool,
+                    config=poetry.config,
+                )
+                command.set_installer(installer)
+
+            # Update installer package
+            installer_package = self.update_package_groups(command.installer._package)
+            if installer_package:
+                command.installer._package = installer_package
 
     def should_process_command(self, command) -> bool:
         """Determines if the command should be processed by the plugin."""
-        return isinstance(command, InstallerCommand)
+        return isinstance(command, (InstallerCommand, AddCommand))
 
 
 class EnvironmentDependencyPlugin(poetry.plugins.application_plugin.ApplicationPlugin):
@@ -65,20 +103,25 @@ class EnvironmentDependencyPlugin(poetry.plugins.application_plugin.ApplicationP
         application.event_dispatcher.add_listener(
             cleo.events.console_events.COMMAND,
             self.event_listener,
+            priority=100  # Higher priority to run before other plugins
         )
 
     def event_listener(
-        self,
-        event: cleo.events.console_command_event.ConsoleCommandEvent,
-        event_name: str,
-        dispatcher: cleo.events.event_dispatcher.EventDispatcher,
+            self,
+            event: cleo.events.console_command_event.ConsoleCommandEvent,
+            event_name: str,
+            dispatcher: cleo.events.event_dispatcher.EventDispatcher,
     ) -> None:
         if not self.env_manager.should_process_command(event.command):
             return
 
-        event.io.write_line(
-            f"Processing dependencies for environment: {self.env_manager.current_env}",
-            verbosity=cleo.io.outputs.output.Verbosity.DEBUG,
-        )
+        try:
+            if event.io and hasattr(event.io, 'write_line'):
+                event.io.write_line(
+                    f"Processing dependencies for environment: {self.env_manager.current_env}",
+                    verbosity=Verbosity.DEBUG,
+                )
+        except Exception:
+            pass  # Ignore IO errors
 
-        self.env_manager.update_installer_package(event.command)
+        self.env_manager.setup_command(event.command, self.poetry)
